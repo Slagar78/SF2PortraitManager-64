@@ -11,6 +11,9 @@ import java.io.File;
 import java.util.HashSet;
 import java.util.Set;
 import javax.imageio.ImageIO;
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 
 import com.sfc.sf2.graphics.GraphicsManager;
 import com.sfc.sf2.graphics.Tile;
@@ -73,47 +76,73 @@ public class PortraitManager {
         int tilesX = w / 8;
         int tilesY = h / 8;
         int totalTiles = tilesX * tilesY;
-
+    
         System.out.println("Creating " + totalTiles + " tiles...");
-
+    
         int[] paletteData = new int[64];
-        paletteData[0] = 0x00000000;
-
-        Set<Integer> unique = new HashSet<>();
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                int rgb = src.getRGB(x, y) & 0x00FFFFFF;
-                if (unique.size() < 63) unique.add(rgb);
+    
+        // === НОВЫЙ КОД: сохраняем порядок палитры точно как в загруженном PNG/GIF ===
+        if (src.getColorModel() instanceof IndexColorModel) {
+            // Если картинка уже индексированная (имеет палитру) — берём её порядок 1 в 1
+            IndexColorModel icm = (IndexColorModel) src.getColorModel();
+            int mapSize = icm.getMapSize();
+    
+            System.out.println("Detected indexed image with " + mapSize + " colors in palette");
+    
+            for (int i = 0; i < 64; i++) {
+                if (i < mapSize) {
+                    paletteData[i] = icm.getRGB(i);           // точный цвет + альфа из файла
+                } else {
+                    paletteData[i] = 0xFF000000;              // паддим чёрным (как было раньше)
+                }
             }
+        } else {
+            // Если картинка не индексированная — собираем цвета в порядке первого появления
+            // (LinkedHashSet гарантирует порядок вставки)
+            Set<Integer> unique = new LinkedHashSet<>();
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    int rgb = src.getRGB(x, y) & 0x00FFFFFF;
+                    unique.add(rgb);
+                    if (unique.size() >= 63) break;
+                }
+                if (unique.size() >= 63) break;
+            }
+    
+            paletteData[0] = 0x00000000;   // 0-й цвет — прозрачный (как было в оригинале)
+            int idx = 1;
+            for (int color : unique) {
+                if (idx < 64) {
+                    paletteData[idx++] = color | 0xFF000000;
+                }
+            }
+            while (idx < 64) paletteData[idx++] = 0xFF000000;
         }
-        int idx = 1;
-        for (int color : unique) {
-            if (idx < 64) paletteData[idx++] = color | 0xFF000000;
-        }
-        while (idx < 64) paletteData[idx++] = 0xFF000000;
-
+        // ============================================================================
+    
         IndexColorModel icm64 = new IndexColorModel(6, 64, paletteData, 0, true, 0, DataBufferByte.TYPE_BYTE);
-
+    
         Color[] colors = new Color[64];
         for (int i = 0; i < 64; i++) {
             colors[i] = new Color(paletteData[i], true);
         }
         Palette64 sharedPalette = new Palette64(colors);
-
+    
+        // ... остальной код метода без изменений (создание тайлов, рефлексия и т.д.)
         Tile[] tilesArr = new Tile[totalTiles];
         int tileIndex = 0;
-
+    
         for (int ty = 0; ty < tilesY; ty++) {
             for (int tx = 0; tx < tilesX; tx++) {
                 Tile tile = new Tile();
-
+    
                 int[][] tilePixels = new int[8][8];
                 for (int py = 0; py < 8; py++) {
                     for (int px = 0; px < 8; px++) {
                         int x = tx * 8 + px;
                         int y = ty * 8 + py;
                         int rgb = src.getRGB(x, y) & 0x00FFFFFF;
-
+    
                         int colorIndex = 0;
                         for (int c = 0; c < 64; c++) {
                             if ((paletteData[c] & 0x00FFFFFF) == rgb) {
@@ -124,7 +153,7 @@ public class PortraitManager {
                         tilePixels[py][px] = colorIndex;
                     }
                 }
-
+    
                 tile.setPixels(tilePixels);
                 
                 try {
@@ -134,7 +163,7 @@ public class PortraitManager {
                 } catch (Exception ex) {
                     System.err.println("Reflection setPalette failed: " + ex.getMessage());
                 }
-
+    
                 BufferedImage tileImage = new BufferedImage(8, 8, BufferedImage.TYPE_BYTE_INDEXED, icm64);
                 byte[] data = ((DataBufferByte) tileImage.getRaster().getDataBuffer()).getData();
                 for (int py = 0; py < 8; py++) {
@@ -142,7 +171,7 @@ public class PortraitManager {
                         data[py * 8 + px] = (byte) tilePixels[py][px];
                     }
                 }
-
+    
                 try {
                     java.lang.reflect.Field field = Tile.class.getDeclaredField("indexedColorImage");
                     field.setAccessible(true);
@@ -150,12 +179,12 @@ public class PortraitManager {
                 } catch (Exception ignored) {
                     tile.clearIndexedColorImage();
                 }
-
+    
                 tilesArr[tileIndex++] = tile;
             }
         }
-
-        System.out.println("All 64 tiles created with shared 64-color palette");
+    
+        System.out.println("All 64 tiles created with shared 64-color palette (order preserved from source image)");
         return tilesArr;
     }
     
