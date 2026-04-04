@@ -1,3 +1,8 @@
 ## Repo Archived
-This project has been consolidated into https://github.com/ShiningForceCentral/SF2JavaToolSuite.<br>
-The tools will continue to be updated and placed in https://github.com/ShiningForceCentral/SF2DISASM.
+SF2
+
+48-байтный формат
+
+байты 0–3 → обычные 4 битплейна (bits 0–3)
+байт 4 → plane bit5
+байт 5 → plane bit4
